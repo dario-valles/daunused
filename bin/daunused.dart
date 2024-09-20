@@ -66,6 +66,17 @@ Future<Set<String>> _resolveImportExport(String line, File currentFile, List<Fil
 
     if (resolvedFile != null) {
       resolvedFiles.add(resolvedFile.path);
+
+      // If this is an export, we need to check the exported file for further exports
+      if (line.startsWith('export')) {
+        final String exportedContent = await resolvedFile.readAsString();
+        final List<String> exportedLines = exportedContent.split('\n');
+        for (final String exportedLine in exportedLines) {
+          if (_isExportLine(exportedLine.trim())) {
+            resolvedFiles.addAll(await _resolveImportExport(exportedLine.trim(), resolvedFile, allFiles));
+          }
+        }
+      }
     }
   }
 
@@ -74,6 +85,10 @@ Future<Set<String>> _resolveImportExport(String line, File currentFile, List<Fil
 
 bool _isImportOrExportLine(String line) {
   return line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ') || (line.startsWith('if (') && line.contains('.dart'));
+}
+
+bool _isExportLine(String line) {
+  return line.startsWith('export ');
 }
 
 bool _isException(File file, List<String> exceptions) {
@@ -89,10 +104,6 @@ bool _isException(File file, List<String> exceptions) {
     }
     return false;
   }
-}
-
-bool _isImportOrExportLine(String line) {
-  return line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ') || (line.startsWith('if (') && line.contains('.dart'));
 }
 
 List<String> _exceptions(List<String> args) {
