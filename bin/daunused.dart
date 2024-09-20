@@ -26,6 +26,20 @@ Future<Set<String>> _getAllUsedFiles(List<File> files) async {
   return usedFiles;
 }
 
+Future<Set<String>> _getUsedFiles(File file) async {
+  final String content = await file.readAsString();
+  final List<String> lines = content.split('\n');
+  final Set<String> usedFiles = <String>{};
+
+  for (final String line in lines) {
+    if (_isImportOrExportLine(line.trim())) {
+      usedFiles.addAll(_extractFileNames(line.trim()));
+    }
+  }
+
+  return usedFiles;
+}
+
 Set<String> _extractFileNames(String line) {
   final Set<String> fileNames = <String>{};
   final RegExp fileNameRegex = RegExp(r"'([^']+\.dart)'");
@@ -39,37 +53,8 @@ Set<String> _extractFileNames(String line) {
   return fileNames;
 }
 
-Future<Set<String>> _getUsedFiles(File file) async {
-  final String content = await file.readAsString();
-  final List<String> lines = content.split('\n');
-  final List<String> importsAndExports = _filesImportedAndExported(lines);
-  final Set<String> usedFiles = <String>{};
-
-  for (final String line in importsAndExports) {
-    usedFiles.addAll(_extractFileNames(line));
-  }
-
-  return usedFiles;
-}
-
-List<String> _filesImportedAndExported(List<String> lines) {
-  final List<String> result = <String>[];
-  for (final String line in lines) {
-    if (_isImportOrExportLine(line.trim())) {
-      result.add(line.trim());
-    }
-  }
-  return result;
-}
-
 bool _isImportOrExportLine(String line) {
-  if (line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ')) {
-    return true;
-  } else if (line.startsWith('if (') && (line.endsWith('.dart\'') || line.endsWith('.dart\';'))) {
-    return true;
-  } else {
-    return false;
-  }
+  return line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ') || (line.startsWith('if (') && line.contains('.dart'));
 }
 
 bool _isException(File file, List<String> exceptions) {
