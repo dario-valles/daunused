@@ -8,11 +8,67 @@ Future<void> main(List<String> args) async {
   final Directory root = Directory(args[0]);
   final List<String> exceptions = _exceptions(args);
   final List<File> files = await _getFiles(root);
+  final Set<String> usedFiles = await _getAllUsedFiles(files);
 
   for (final File file in files) {
-    if (!_isException(file, exceptions) && await _isNotUsed(file, files)) {
+    final String fileName = _basename(file);
+    if (!_isException(file, exceptions) && !usedFiles.contains(fileName)) {
       stderr.writeln('\x1B[31m${file.uri}\x1B[0m');
     }
+  }
+}
+
+Future<Set<String>> _getAllUsedFiles(List<File> files) async {
+  final Set<String> usedFiles = <String>{};
+  for (final File file in files) {
+    usedFiles.addAll(await _getUsedFiles(file));
+  }
+  return usedFiles;
+}
+
+Set<String> _extractFileNames(String line) {
+  final Set<String> fileNames = <String>{};
+  final RegExp fileNameRegex = RegExp(r"'([^']+\.dart)'");
+  final Iterable<RegExpMatch> matches = fileNameRegex.allMatches(line);
+
+  for (final RegExpMatch match in matches) {
+    final String fileName = _basename(File(match.group(1)!));
+    fileNames.add(fileName);
+  }
+
+  return fileNames;
+}
+
+Future<Set<String>> _getUsedFiles(File file) async {
+  final String content = await file.readAsString();
+  final List<String> lines = content.split('\n');
+  final List<String> importsAndExports = _filesImportedAndExported(lines);
+  final Set<String> usedFiles = <String>{};
+
+  for (final String line in importsAndExports) {
+    usedFiles.addAll(_extractFileNames(line));
+  }
+
+  return usedFiles;
+}
+
+List<String> _filesImportedAndExported(List<String> lines) {
+  final List<String> result = <String>[];
+  for (final String line in lines) {
+    if (_isImportOrExportLine(line.trim())) {
+      result.add(line.trim());
+    }
+  }
+  return result;
+}
+
+bool _isImportOrExportLine(String line) {
+  if (line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ')) {
+    return true;
+  } else if (line.startsWith('if (') && (line.endsWith('.dart\'') || line.endsWith('.dart\';'))) {
+    return true;
+  } else {
+    return false;
   }
 }
 
@@ -103,13 +159,11 @@ List<String> _filesImported(List<String> lines) {
 bool _isImportLine(String line) {
   if (line.startsWith('import ') || line.startsWith('part ')) {
     return true;
-  } else if (line.startsWith('if (') &&
-      (line.endsWith('.dart\'') || line.endsWith('.dart\';'))) {
+  } else if (line.startsWith('if (') && (line.endsWith('.dart\'') || line.endsWith('.dart\';'))) {
     return true;
   } else {
     return false;
   }
 }
 
-String _basename(File file) =>
-    Uri.parse(file.path).path.split(Platform.pathSeparator).last;
+String _basename(File file) => Uri.parse(file.path).path.split(Platform.pathSeparator).last;
