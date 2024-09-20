@@ -22,19 +22,28 @@ Future<void> main(List<String> args) async {
 Future<Set<String>> _getAllUsedFiles(List<File> files) async {
   final Set<String> usedFiles = <String>{};
   for (final File file in files) {
-    usedFiles.addAll(await _getUsedFiles(file, files));
+    usedFiles.addAll(await _getUsedFilesRecursively(file, files, <String>{}));
   }
   return usedFiles;
 }
 
-Future<Set<String>> _getUsedFiles(File file, List<File> allFiles) async {
+Future<Set<String>> _getUsedFilesRecursively(File file, List<File> allFiles, Set<String> visited) async {
+  if (visited.contains(file.path)) {
+    return <String>{};
+  }
+  visited.add(file.path);
+
   final String content = await file.readAsString();
   final List<String> lines = content.split('\n');
-  final Set<String> usedFiles = <String>{};
+  final Set<String> usedFiles = <String>{file.path};
 
   for (final String line in lines) {
     if (_isImportOrExportLine(line.trim())) {
-      usedFiles.addAll(await _resolveImportExport(line.trim(), file, allFiles));
+      final Set<String> resolvedFiles = await _resolveImportExport(line.trim(), file, allFiles);
+      for (final String resolvedPath in resolvedFiles) {
+        final File resolvedFile = File(resolvedPath);
+        usedFiles.addAll(await _getUsedFilesRecursively(resolvedFile, allFiles, visited));
+      }
     }
   }
 
@@ -43,24 +52,28 @@ Future<Set<String>> _getUsedFiles(File file, List<File> allFiles) async {
 
 Future<Set<String>> _resolveImportExport(String line, File currentFile, List<File> allFiles) async {
   final Set<String> resolvedFiles = <String>{};
-  final RegExp fileNameRegex = RegExp(r"'([^']+\.dart)'");
+  final RegExp fileNameRegex = RegExp(r"'([^']+)'");
   final Iterable<RegExpMatch> matches = fileNameRegex.allMatches(line);
 
   for (final RegExpMatch match in matches) {
-    final String importPath = match.group(1)!;
+    String importPath = match.group(1)!;
+    if (importPath.startsWith('package:')) {
+      final List<String> parts = importPath.split('/');
+      importPath = parts.sublist(1).join('/');
+    }
     final String resolvedPath = path.normalize(path.join(path.dirname(currentFile.path), importPath));
     final File? resolvedFile = allFiles.firstWhere((File f) => f.path == resolvedPath, orElse: () => File(''));
 
     if (resolvedFile != null) {
       resolvedFiles.add(resolvedFile.path);
-      if (line.startsWith('export')) {
-        // For exports, also include files exported by the resolved file
-        resolvedFiles.addAll(await _getUsedFiles(resolvedFile, allFiles));
-      }
     }
   }
 
   return resolvedFiles;
+}
+
+bool _isImportOrExportLine(String line) {
+  return line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ') || (line.startsWith('if (') && line.contains('.dart'));
 }
 
 bool _isException(File file, List<String> exceptions) {
