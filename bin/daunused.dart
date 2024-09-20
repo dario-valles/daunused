@@ -4,6 +4,8 @@ library daunused;
 
 import 'dart:io';
 
+import 'package:path/path.dart' as path;
+
 Future<void> main(List<String> args) async {
   final Directory root = Directory(args[0]);
   final List<String> exceptions = _exceptions(args);
@@ -11,8 +13,7 @@ Future<void> main(List<String> args) async {
   final Set<String> usedFiles = await _getAllUsedFiles(files);
 
   for (final File file in files) {
-    final String fileName = _basename(file);
-    if (!_isException(file, exceptions) && !usedFiles.contains(fileName)) {
+    if (!_isException(file, exceptions) && !usedFiles.contains(file.path)) {
       stderr.writeln('\x1B[31m${file.uri}\x1B[0m');
     }
   }
@@ -21,58 +22,64 @@ Future<void> main(List<String> args) async {
 Future<Set<String>> _getAllUsedFiles(List<File> files) async {
   final Set<String> usedFiles = <String>{};
   for (final File file in files) {
-    usedFiles.addAll(await _getUsedFiles(file));
+    usedFiles.addAll(await _getUsedFiles(file, files));
   }
   return usedFiles;
 }
 
-Future<Set<String>> _getUsedFiles(File file) async {
+Future<Set<String>> _getUsedFiles(File file, List<File> allFiles) async {
   final String content = await file.readAsString();
   final List<String> lines = content.split('\n');
   final Set<String> usedFiles = <String>{};
 
   for (final String line in lines) {
     if (_isImportOrExportLine(line.trim())) {
-      usedFiles.addAll(_extractFileNames(line.trim()));
+      usedFiles.addAll(await _resolveImportExport(line.trim(), file, allFiles));
     }
   }
 
   return usedFiles;
 }
 
-Set<String> _extractFileNames(String line) {
-  final Set<String> fileNames = <String>{};
+Future<Set<String>> _resolveImportExport(String line, File currentFile, List<File> allFiles) async {
+  final Set<String> resolvedFiles = <String>{};
   final RegExp fileNameRegex = RegExp(r"'([^']+\.dart)'");
   final Iterable<RegExpMatch> matches = fileNameRegex.allMatches(line);
 
   for (final RegExpMatch match in matches) {
-    final String fileName = _basename(File(match.group(1)!));
-    fileNames.add(fileName);
+    final String importPath = match.group(1)!;
+    final String resolvedPath = path.normalize(path.join(path.dirname(currentFile.path), importPath));
+    final File? resolvedFile = allFiles.firstWhere((File f) => f.path == resolvedPath, orElse: () => File(''));
+
+    if (resolvedFile != null) {
+      resolvedFiles.add(resolvedFile.path);
+      if (line.startsWith('export')) {
+        // For exports, also include files exported by the resolved file
+        resolvedFiles.addAll(await _getUsedFiles(resolvedFile, allFiles));
+      }
+    }
   }
 
-  return fileNames;
-}
-
-bool _isImportOrExportLine(String line) {
-  return line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ') || (line.startsWith('if (') && line.contains('.dart'));
+  return resolvedFiles;
 }
 
 bool _isException(File file, List<String> exceptions) {
   final String uri = file.uri.toString();
-
   if (exceptions.contains(uri)) {
     return true;
   } else {
     for (final String exception in exceptions) {
       final RegExp exp = RegExp(exception);
-
       if (exp.hasMatch(uri)) {
         return true;
       }
     }
-
     return false;
   }
+}
+
+bool _isImportOrExportLine(String line) {
+  return line.startsWith('import ') || line.startsWith('export ') || line.startsWith('part ') || (line.startsWith('if (') && line.contains('.dart'));
 }
 
 List<String> _exceptions(List<String> args) {
